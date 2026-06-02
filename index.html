@@ -252,6 +252,14 @@ body.editing{padding-bottom:62px}
 .color-input-row{display:flex;align-items:center;gap:12px}
 .color-input-row input[type=color]{width:48px;height:38px;border:1px solid var(--line);background:#120d08;border-radius:5px;cursor:pointer;padding:2px}
 .sheet-hint{font-size:.86rem;color:var(--bone-dim)}
+.gh-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.sheet input[type=text],.sheet input[type=password]{width:100%;font-family:"Special Elite",monospace;font-size:.86rem;color:var(--silver-2);background:#0c0805;border:1px solid var(--line);border-radius:5px;padding:9px 11px}
+.sheet input[type=text]:focus,.sheet input[type=password]:focus{outline:none;border-color:var(--gold)}
+.gh-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:4px}
+.gh-status{margin-top:12px;font-size:.92rem;min-height:1.2em;line-height:1.5}
+.gh-status.ok{color:#8cc98c}.gh-status.err{color:#e09a78}
+.gh-link{color:var(--gold);text-decoration:underline;cursor:pointer}
+@media(max-width:520px){.gh-grid{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
@@ -360,7 +368,9 @@ body.editing{padding-bottom:62px}
   <input id="importFile" type="file" accept="application/json,.json" hidden>
   <button class="tb-btn" id="btnExport">JSON-Export</button>
   <span class="spacer"></span>
+  <button class="tb-btn" id="btnGitHub">☁ GitHub</button>
   <button class="tb-btn primary" id="btnSave">💾 Speichern</button>
+  <button class="tb-btn" id="btnDownload">⤓ Datei</button>
   <button class="tb-btn danger" id="btnLogout">Abmelden</button>
 </div>
 
@@ -991,9 +1001,12 @@ document.getElementById('logoFile').addEventListener('change',ev=>{
   const r=new FileReader(); r.onload=()=>{ MODEL.logo=r.result; applyLogo(); ev.target.value=''; }; r.readAsDataURL(f);
 });
 document.getElementById('btnSave').addEventListener('click',saveHTML);
+document.getElementById('btnDownload').addEventListener('click',saveLocalFile);
+document.getElementById('btnGitHub').addEventListener('click',openGitHub);
 
-/* ----- save as file (serialise a clean PUBLIC view) ----- */
-function saveHTML(){
+/* ----- build a clean PUBLIC view of the whole page ----- */
+function buildPublicHTML(){
+  closeSheet();                                    // never serialise dialog inputs
   const wasAuthed=authed, wasPrev=previewing;
   previewing=true; render();                       // produce clean public DOM (no edit UI)
   document.getElementById('ruleData').textContent = JSON.stringify(MODEL,null,2).replace(/</g,'\\u003c');
@@ -1001,8 +1014,149 @@ function saveHTML(){
   let html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
   html=html.replace(/\s+contenteditable="[^"]*"/g,'').replace(/\s+data-ph="[^"]*"/g,'');
   authed=wasAuthed; previewing=wasPrev; render();  // restore working state
-  downloadFile(html,'regelwerk.html','text/html');
+  return html;
 }
+
+/* ===== GitHub: commit straight into the repo (GitHub Pages auto-rebuilds) ===== */
+let ghToken='';                                    // kept in memory only — never put in MODEL/file
+function loadToken(){ if(!ghToken){ try{ const t=sessionStorage.getItem('gs_gh_token'); if(t) ghToken=t; }catch(_){} } return ghToken; }
+function saveTokenPref(remember){ try{ if(remember&&ghToken) sessionStorage.setItem('gs_gh_token',ghToken); else sessionStorage.removeItem('gs_gh_token'); }catch(_){} }
+
+function utf8ToBase64(str){
+  const bytes=new TextEncoder().encode(str); let bin=''; const CH=0x8000;
+  for(let i=0;i<bytes.length;i+=CH) bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+CH));
+  return btoa(bin);
+}
+async function ghErr(r){
+  let m=''; try{ const j=await r.json(); m=j.message||''; }catch(_){}
+  if(r.status===401) return 'Token ungültig oder abgelaufen (401).';
+  if(r.status===403) return 'Zugriff verweigert oder Limit erreicht (403). '+m;
+  if(r.status===404) return 'Repository, Branch oder Pfad nicht gefunden (404). Prüfe die Angaben und ob der Token Zugriff auf dieses Repo hat.';
+  if(r.status===409) return 'Konflikt (409): Datei wurde zwischenzeitlich geändert — bitte erneut versuchen.';
+  if(r.status===422) return 'Ungültige Anfrage (422). '+m;
+  return 'HTTP '+r.status+(m?(' – '+m):'');
+}
+async function commitToGitHub(html){
+  const g=MODEL.github;
+  const seg=g.path.split('/').filter(Boolean).map(encodeURIComponent).join('/');
+  const base='https://api.github.com/repos/'+encodeURIComponent(g.owner)+'/'+encodeURIComponent(g.repo)+'/contents/'+seg;
+  const headers={'Authorization':'Bearer '+ghToken,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};
+  let sha=null;
+  const get=await fetch(base+'?ref='+encodeURIComponent(g.branch),{headers});
+  if(get.status===200){ const j=await get.json(); sha=Array.isArray(j)?null:j.sha; }
+  else if(get.status!==404){ throw new Error(await ghErr(get)); }
+  const body={message:'Regelwerk aktualisiert ('+new Date().toLocaleString('de-DE')+')',content:utf8ToBase64(html),branch:g.branch};
+  if(sha) body.sha=sha;
+  const put=await fetch(base,{method:'PUT',headers:Object.assign({'Content-Type':'application/json'},headers),body:JSON.stringify(body)});
+  if(!put.ok) throw new Error(await ghErr(put));
+  return put.json();
+}
+function ghDefaults(){
+  const g=Object.assign({owner:'',repo:'',branch:'main',path:'regelwerk.html'}, MODEL.github||{});
+  try{ const h=location.hostname; if(!g.owner && h.endsWith('.github.io')) g.owner=h.replace('.github.io',''); }catch(_){}
+  return g;
+}
+function openGitHub(){
+  const g=ghDefaults(); const hasTok=!!loadToken();
+  const html=`
+    <p class="sheet-hint" style="margin-bottom:16px">Speichert direkt in dein GitHub-Repository — GitHub&nbsp;Pages aktualisiert die Live-Seite danach automatisch (kann ~1&nbsp;Minute dauern).</p>
+    <div class="fld"><div class="gh-grid">
+      <div><label>Benutzer / Organisation</label><input type="text" id="gh-owner" value="${esc(g.owner)}" placeholder="dein-benutzername"></div>
+      <div><label>Repository</label><input type="text" id="gh-repo" value="${esc(g.repo)}" placeholder="mein-repo"></div>
+      <div><label>Branch</label><input type="text" id="gh-branch" value="${esc(g.branch)}" placeholder="main"></div>
+      <div><label>Pfad zur Datei</label><input type="text" id="gh-path" value="${esc(g.path)}" placeholder="regelwerk.html"></div>
+    </div></div>
+    <div class="fld"><label>Access-Token <span style="color:var(--bone-dim);text-transform:none;letter-spacing:0">(nur im Speicher, wird nicht in die Datei geschrieben)</span></label>
+      <input type="password" id="gh-token" placeholder="${hasTok?'•••••• (aus Sitzung) — leer lassen zum Weiterverwenden':'github_pat_…'}" autocomplete="off">
+      <label class="toggle-row" style="margin-top:8px"><input type="checkbox" id="gh-remember" ${hasTok?'checked':''}> Token für diese Sitzung merken</label>
+      <p class="sheet-hint" style="margin-top:8px">Token anlegen: <span class="gh-link" id="gh-help">github.com → Fine-grained&nbsp;Token</span>. Repository-Zugriff auf <i>nur dieses Repo</i> beschränken, Berechtigung <b>Contents: Read and write</b>.</p>
+    </div>
+    <div class="gh-actions">
+      <button class="btn btn-gold" id="gh-save">☁ Speichern &amp; veröffentlichen</button>
+      <button class="tb-btn" id="gh-download" style="border-color:var(--line)">⤓ Stattdessen als Datei</button>
+    </div>
+    <div class="gh-status" id="gh-status"></div>`;
+  openSheet('Auf GitHub speichern', html, body=>{
+    body.querySelector('#gh-help').addEventListener('click',()=>{ try{window.open('https://github.com/settings/personal-access-tokens/new','_blank');}catch(_){}} );
+    body.querySelector('#gh-download').addEventListener('click',()=>{ closeSheet(); saveLocalFile(); });
+    body.querySelector('#gh-save').addEventListener('click',async()=>{
+      const owner=body.querySelector('#gh-owner').value.trim();
+      const repo=body.querySelector('#gh-repo').value.trim();
+      const branch=body.querySelector('#gh-branch').value.trim()||'main';
+      const path=body.querySelector('#gh-path').value.trim()||'regelwerk.html';
+      const typed=body.querySelector('#gh-token').value.trim();
+      const remember=body.querySelector('#gh-remember').checked;
+      const status=body.querySelector('#gh-status'), btn=body.querySelector('#gh-save');
+      if(!owner||!repo||!path){ status.className='gh-status err'; status.textContent='Bitte Benutzer, Repository und Pfad ausfüllen.'; return; }
+      const token=typed||ghToken;
+      if(!token){ status.className='gh-status err'; status.textContent='Bitte einen Access-Token einfügen.'; return; }
+      MODEL.github={owner,repo,branch,path}; ghToken=token; saveTokenPref(remember);
+      status.className='gh-status'; status.textContent='Veröffentliche …'; btn.disabled=true;
+      try{
+        const out=buildPublicHTML();            // closes this sheet; values already captured above
+        await commitToGitHub(out);
+        flashSaved('✓ Veröffentlicht');
+        alert('✓ Erfolgreich auf GitHub gespeichert.\nDie Live-Seite über GitHub Pages aktualisiert sich in Kürze (ca. 1 Minute).');
+      }catch(err){
+        openGitHub();                           // reopen with values; token stays in session
+        const s=document.getElementById('gh-status'); if(s){ s.className='gh-status err'; s.textContent='Fehler: '+err.message; }
+      }
+    });
+  });
+}
+
+/* ----- "💾 Speichern" → fast publish to GitHub (setup on first use) ----- */
+async function saveHTML(){
+  const g=MODEL.github;
+  if(!(g&&g.owner&&g.repo&&g.path)){ openGitHub(); return; }
+  if(!loadToken()){ openGitHub(); return; }
+  flashSaved('… veröffentliche');
+  try{
+    const out=buildPublicHTML();
+    await commitToGitHub(out);
+    flashSaved('✓ Veröffentlicht');
+  }catch(err){
+    flashSaved('✗ Fehler');
+    alert('GitHub-Fehler: '+err.message+'\n\nÖffne „☁ GitHub", um Repository oder Token zu prüfen.');
+  }
+}
+
+/* ===== local file: write back to the same file (Chrome/Edge/Opera) or download ===== */
+let fileHandle=null;
+async function saveLocalFile(){
+  if(window.showSaveFilePicker){
+    try{
+      if(!fileHandle){
+        fileHandle = await window.showSaveFilePicker({
+          suggestedName:'regelwerk.html',
+          types:[{description:'HTML-Datei',accept:{'text/html':['.html','.htm']}}]
+        });
+      }
+      let perm = await fileHandle.queryPermission({mode:'readwrite'});
+      if(perm!=='granted') perm = await fileHandle.requestPermission({mode:'readwrite'});
+      if(perm==='granted'){
+        const out=buildPublicHTML();
+        const w=await fileHandle.createWritable();
+        await w.write(out); await w.close();
+        flashSaved('✓ Gespeichert');
+        return;
+      }
+    }catch(err){
+      if(err && err.name==='AbortError') return;
+      fileHandle=null;
+    }
+  }
+  downloadFile(buildPublicHTML(),'regelwerk.html','text/html');
+  flashSaved('⤓ Heruntergeladen');
+}
+
+function flashSaved(msg){
+  const b=document.getElementById('btnSave'); if(!b) return;
+  const prev=b.dataset.label||b.textContent; b.dataset.label=prev;
+  b.textContent=msg; b.disabled=true;
+  setTimeout(()=>{ b.textContent=b.dataset.label; b.disabled=false; }, 1900);
+}
+
 function downloadFile(text,name,type){
   const blob=new Blob([text],{type}), url=URL.createObjectURL(blob);
   const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove();
