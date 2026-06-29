@@ -685,6 +685,12 @@ body.editing{padding-bottom:62px}
     "repo": "regelwerk",
     "branch": "main",
     "path": "index.html"
+  },
+  "auth": {
+    "v": 2,
+    "salt": "fd519f0a498a004bc45d5e489083b3f1",
+    "iter": 250000,
+    "hash": "f17b4b1f0c7178f0e03f7e69a9b5f13bfd63955321f83040202877f99259fb0d"
   }
 }</script>
 <script>
@@ -711,7 +717,7 @@ function sha256(ascii){
 }
 
 const MODEL = JSON.parse(document.getElementById('ruleData').textContent);
-const STORED_HASH = "7501fd1d2bd1cb59cd846eccd456fad0a8806c0a99e0404e651034fef9476e48";
+const STORED_HASH = "";
 /* ----- credential check: salted PBKDF2 (strong) with legacy fallback ----- */
 const PBKDF2_ITER = 250000;
 function _hexToBytes(h){ const a=new Uint8Array(h.length/2); for(let i=0;i<a.length;i++) a[i]=parseInt(h.substr(i*2,2),16); return a; }
@@ -1275,4 +1281,4 @@ render();
 </script>
 
 
-</body></html>
+<div popover="manual" style="z-index: 2147483647 !important; padding: 0px !important; margin: 0px !important; border-radius: 8px !important; position: fixed !important; color-scheme: normal !important; box-shadow: rgba(0, 0, 0, 0.15) 0px 2px 4px 0px, rgba(0, 0, 0, 0.18) 0px 8px 15px 6px !important; border: 1px solid rgba(0, 0, 0, 0.9) !important; overflow: hidden !important; backdrop-filter: blur(20px) !important; background-color: rgba(35, 35, 35, 0.83) !important; top: 690px !important; left: -999999px !important; opacity: 0 !important; visibility: hidden !important; height: 82px !important; width: 244px !important;"></div></body></html>
