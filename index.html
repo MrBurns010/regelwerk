@@ -301,10 +301,6 @@ body.editing{padding-bottom:62px}
       <h5 id="m-tocTitle" data-path="meta.tocTitle">Regelwerk</h5>
       <ol id="tocList"><li><a href="#allgemein">Allgemeine Regeln</a></li><li><a href="#roleplay">RP-Grundsätze</a></li><li><a href="#verboten">Verbotenes Verhalten im RP</a></li><li><a href="#combat">Gewalt, Waffen &amp; Tötung</a></li><li><a href="#crime">Raub, Entführung &amp; Verbrechen</a></li><li><a href="#voice">Voice &amp; Kommunikation</a></li><li><a href="#streaming">Streaming &amp; Aufnahmen</a></li><li><a href="#zero">Absolut verboten</a></li><li><a href="#sanktionen">Sanktionen</a></li><li><a href="#glossar">Begriffe &amp; Glossar</a></li></ol>
     </div>
-    <div class="side-box">
-      <h5 id="m-linksTitle" data-path="meta.linksTitle">Weitere Regelwerke</h5>
-      <div id="linksBox"></div>
-    </div>
   </aside>
   <main id="content"><section class="sec" id="allgemein"><div class="sec-head"><div class="sec-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"></path><path d="M9 12l2 2 4-4"></path></svg></div>
     <div><div class="sec-num">Paragraph 1</div><h2>Allgemeine Regeln</h2></div></div><p class="sec-intro">Die Grundlage für ein respektvolles Miteinander — In-Character wie Out-of-Character.</p><ol class="rules"><li><span class="rtext">Behandle jeden Spieler mit Respekt — Beleidigungen oder Provokationen auf OOC-Ebene werden nicht geduldet.</span></li><li><span class="rtext">Den Anweisungen des Serverteams ist Folge zu leisten. Diskussionen erfolgen sachlich über ein Discord-Ticket.</span></li><li><span class="rtext">Unwissenheit schützt nicht vor Strafe. Jeder Spieler ist verpflichtet, das Regelwerk zu kennen.</span></li><li><span class="rtext">Die Weitergabe deines Accounts ist untersagt. Du bist für sämtliche Handlungen auf deinem Account verantwortlich.</span></li><li><span class="rtext">Das Regelwerk kann jederzeit angepasst werden. Änderungen werden im Discord bekanntgegeben und treten sofort in Kraft.</span></li><li><span class="rtext">Bei Unklarheiten gilt stets die Auslegung des Teams als bindend.</span></li></ol></section><section class="sec" id="roleplay"><div class="sec-head"><div class="sec-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7l9-4 9 4-9 4z"></path><path d="M3 7v6l9 4 9-4V7"></path><path d="M12 11v8"></path></svg></div>
@@ -913,7 +909,7 @@ function preventNav(e){ e.preventDefault(); }
 /* ----- master render ----- */
 function render(){
   applyTheme(); applyLogo();
-  renderHeader(); renderToc(); renderContent(); renderLinks(); renderAccept();
+  renderHeader(); renderToc(); renderContent(); renderAccept();
   document.body.classList.toggle('editing', authed);
   document.body.classList.toggle('edit-ui', E());
   initSpy();
