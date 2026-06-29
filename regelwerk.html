@@ -436,6 +436,7 @@ body.editing{padding-bottom:62px}
   <button class="tb-btn" id="btnGitHub">☁ GitHub</button>
   <button class="tb-btn primary" id="btnSave" data-label="💾 Speichern" disabled="">… veröffentliche</button>
   <button class="tb-btn" id="btnDownload">⤓ Datei</button>
+  <button class="tb-btn" id="btnPass">🔑 Passwort</button>
   <button class="tb-btn danger" id="btnLogout">Abmelden</button>
 </div>
 
@@ -715,6 +716,26 @@ function sha256(ascii){
 
 const MODEL = JSON.parse(document.getElementById('ruleData').textContent);
 const STORED_HASH = "7501fd1d2bd1cb59cd846eccd456fad0a8806c0a99e0404e651034fef9476e48";
+/* ----- credential check: salted PBKDF2 (strong) with legacy fallback ----- */
+const PBKDF2_ITER = 250000;
+function _hexToBytes(h){ const a=new Uint8Array(h.length/2); for(let i=0;i<a.length;i++) a[i]=parseInt(h.substr(i*2,2),16); return a; }
+function _bytesToHex(b){ return Array.from(b).map(x=>x.toString(16).padStart(2,'0')).join(''); }
+async function pbkdf2Hex(user,pass,saltHex,iter){
+  const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(user.trim()+':'+pass),{name:'PBKDF2'},false,['deriveBits']);
+  const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt:_hexToBytes(saltHex),iterations:iter,hash:'SHA-256'},key,256);
+  return _bytesToHex(new Uint8Array(bits));
+}
+async function verifyLogin(user,pass){
+  const a=MODEL.auth;
+  if(a && a.hash && a.salt){                       // strong scheme (preferred)
+    return (await pbkdf2Hex(user,pass,a.salt,a.iter||PBKDF2_ITER))===a.hash;
+  }
+  return typeof sha256==='function' && sha256(user.trim()+':'+pass)===STORED_HASH;   // legacy fallback
+}
+async function makeAuth(user,pass){
+  const salt=_bytesToHex(crypto.getRandomValues(new Uint8Array(16)));
+  return {v:2,salt,iter:PBKDF2_ITER,hash:await pbkdf2Hex(user,pass,salt,PBKDF2_ITER)};
+}
 let authed=false, previewing=false;
 const E = ()=> authed && !previewing;   // edit-UI active?
 
@@ -966,13 +987,15 @@ const modal=document.getElementById('loginModal');
 document.getElementById('editBtn').addEventListener('click',()=>{ modal.classList.add('show'); setTimeout(()=>document.getElementById('luser').focus(),50); });
 document.getElementById('cancelLogin').addEventListener('click',()=>modal.classList.remove('show'));
 modal.addEventListener('click',e=>{ if(e.target===modal) modal.classList.remove('show'); });
-document.getElementById('loginForm').addEventListener('submit',e=>{
+document.getElementById('loginForm').addEventListener('submit',async e=>{
   e.preventDefault();
   const u=document.getElementById('luser').value.trim(), p=document.getElementById('lpass').value;
-  if(sha256(u+':'+p)===STORED_HASH){
-    modal.classList.remove('show'); e.target.reset(); document.getElementById('loginErr').textContent='';
+  const errEl=document.getElementById('loginErr'); errEl.textContent='Prüfe …';
+  let ok=false; try{ ok=await verifyLogin(u,p); }catch(_){ }
+  if(ok){
+    modal.classList.remove('show'); e.target.reset(); errEl.textContent='';
     authed=true; previewing=false; render(); window.scrollTo({top:0,behavior:'smooth'});
-  } else { document.getElementById('loginErr').textContent='Benutzername oder Passwort falsch.'; }
+  } else { errEl.textContent='Benutzername oder Passwort falsch.'; }
 });
 
 /* ----- sheet helpers ----- */
@@ -1044,6 +1067,33 @@ function openTheme(){
 
 /* ----- toolbar ----- */
 document.getElementById('btnLogout').addEventListener('click',()=>{ authed=false; previewing=false; render(); });
+document.getElementById('btnPass').addEventListener('click',openPassword);
+function openPassword(){
+  const isStrong=!!(MODEL.auth&&MODEL.auth.hash);
+  const html=`
+    <p class="sheet-hint" style="margin-bottom:16px">Lege Benutzername und Passwort für den Editor-Login neu fest. Das Passwort selbst wird <b>nicht</b> gespeichert — nur ein gesalzener, langsamer PBKDF2-Hash (250.000 Runden) landet in der Datei und lässt sich praktisch nicht zurückrechnen.${isStrong?'':'<br><b>Hinweis:</b> Aktuell ist noch der alte, schwächere Login aktiv — bitte jetzt neu setzen.'}</p>
+    <div class="fld"><label>Benutzername</label><input type="text" id="pw-user" autocomplete="off" placeholder="benutzer"></div>
+    <div class="fld"><label>Neues Passwort</label><input type="password" id="pw-1" autocomplete="new-password" placeholder="mind. 10 Zeichen"></div>
+    <div class="fld"><label>Passwort wiederholen</label><input type="password" id="pw-2" autocomplete="new-password"></div>
+    <div class="gh-actions"><button class="btn btn-gold" id="pw-save">🔑 Passwort setzen</button></div>
+    <div class="gh-status" id="pw-status"></div>
+    <p class="sheet-hint" style="margin-top:12px">Danach mit „💾 Speichern" bzw. „☁ GitHub" veröffentlichen, damit die Änderung dauerhaft gilt.</p>`;
+  openSheet('Passwort ändern', html, body=>{
+    body.querySelector('#pw-save').addEventListener('click',async()=>{
+      const u=body.querySelector('#pw-user').value.trim();
+      const p1=body.querySelector('#pw-1').value, p2=body.querySelector('#pw-2').value;
+      const st=body.querySelector('#pw-status');
+      if(!u){ st.className='gh-status err'; st.textContent='Bitte einen Benutzernamen angeben.'; return; }
+      if(p1.length<10){ st.className='gh-status err'; st.textContent='Passwort muss mindestens 10 Zeichen haben.'; return; }
+      if(p1!==p2){ st.className='gh-status err'; st.textContent='Die Passwörter stimmen nicht überein.'; return; }
+      st.className='gh-status'; st.textContent='Erzeuge Hash …';
+      try{
+        MODEL.auth=await makeAuth(u,p1);
+        st.className='gh-status'; st.textContent='✓ Passwort gesetzt. Jetzt veröffentlichen, um es dauerhaft zu speichern.';
+      }catch(err){ st.className='gh-status err'; st.textContent='Fehler: '+((err&&err.message)||err); }
+    });
+  });
+}
 const btnPrev=document.getElementById('btnPreview');
 btnPrev.addEventListener('click',()=>{ previewing=!previewing; btnPrev.textContent=previewing?'Weiter bearbeiten':'Vorschau'; render(); });
 document.getElementById('btnAddSec').addEventListener('click',()=>{ MODEL.sections.push({id:uid(),icon:'book',type:'rules',title:'Neuer Abschnitt',intro:'',items:['Neue Regel']}); render(); });
@@ -1072,6 +1122,7 @@ function buildPublicHTML(){
   document.querySelectorAll('.js-logo').forEach(i=>i.removeAttribute('src')); // keep base64 only in the data block
   let html='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
   html=html.replace(/\s+contenteditable="[^"]*"/g,'').replace(/\s+data-ph="[^"]*"/g,'');
+  if(MODEL.auth&&MODEL.auth.hash) html=html.replace(/const STORED_HASH = "[0-9a-f]*";/,'const STORED_HASH = "";'); // drop legacy hash once a strong password is set
   authed=wasAuthed; previewing=wasPrev; render();  // restore working state
   return html;
 }
